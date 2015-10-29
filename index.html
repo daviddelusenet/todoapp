@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+	<head>			
+		<link rel="stylesheet" href="/static/css/reset.css">
+		<link rel="stylesheet" href="/static/css/font-awesome.css">
+		<link rel="stylesheet" href="/static/css/style.css">
+	</head>
+	<body>
+		<div id="todoApp">
+			<h1>Todo app</h1>
+			<div class="content">
+				<input type="text" placeholder="What needs to get done?" id="addTodo" />
+				<ul id="todoList">
+			</ul>
+			</div>
+		</div>
+		<script src="/static/js/vendor/jquery-2.1.4.min.js"></script>
+		<script src="/static/js/vendor/underscore.js"></script>
+		<script src="/static/js/vendor/handlebars-latest.js"></script>
+		<script src="/static/js/vendor/backbone.js"></script>
+		
+		<script id="todo-template" type="text/x-handlebars-template">
+			<input type="checkbox" class="toggle" {{ checked }} />
+			<p class="title">{{ title }}</p>
+			<input type="text" value="{{ title }}" class="update" />
+			<p class="date">Added: {{ date_added }} | Finished: {{ date_finished }}</p>
+			<span class="delete fa fa-close"></span>
+		</script>
+		
+		<script>
+			var app = {};
+			
+			// Todomodel
+			app.TodoModel = Backbone.Model.extend({
+				idAttribute: "ID",
+				defaults: {
+					"title": "Do Me"
+				},
+				toggle: function(){
+					if(this.get('checked') === "checked"){
+						this.save({checked: "", date_finished:'nodate'}, {
+							wait:true,
+							success:function(model, response){
+								console.log("Unchecking Succeeded");
+								console.log(response);
+							},
+							error: function(model, response){
+								console.log("Unchecking Failed");
+								console.log(response);	
+							}
+						});
+					} else {
+						this.save({checked: "checked", date_finished: new Date()}, {
+							wait:true,
+							success:function(model, response){
+								console.log("Checking Succeeded");
+								console.log(response);
+							},
+							error: function(model, response){
+								console.log("Checking Failed");
+								console.log(response);	
+							}
+						});
+					}
+				}
+			});
+			
+			app.TodoCollection = Backbone.Collection.extend({
+				model: app.TodoModel,
+				url: '/src/todos.php'
+			});
+			
+			app.TodoView = Backbone.View.extend({
+				tagName: 'li',
+				template: Handlebars.compile($("#todo-template").html()),
+				render: function(){
+					// Render model
+					this.$el.html(this.template(this.model.toJSON()));
+	                this.input = this.$('.update');
+	                // Check if checked
+	                var checked = this.model.get('checked');
+	                if(checked == "checked"){
+		                this.$el.addClass('done');
+	                };
+	                // Enable chained calls
+					return this; 
+				},
+                initialize: function(){
+					this.listenTo(this.model, 'change', this.render);
+					this.listenTo(this.model, 'destroy', this.remove);
+				},
+				events: {
+					'keypress .update': 'updateOnEnter',
+					'dblclick .title': 'edit',
+					'click .toggle': 'toggle',
+					'click .delete': 'destroy'
+				},
+				updateOnEnter: function(e){
+					if (e.which === 13) { // ENTER_KEY = 13
+						var title = this.input.val().trim();
+						this.model.save({title: title, date_finished: 'nodate'}, {
+							wait:true,
+							success:function(model, response){
+								console.log("Update Succeeded");
+								console.log(response);
+							},
+							error: function(model, response){
+								console.log("Update Failed");
+								console.log(response);	
+							}
+						});
+						this.$el.removeClass('editing');
+						console.log('Editing Done');
+					}
+				},
+				edit: function(){
+					this.$el.addClass('editing').children('.update').focus();
+					console.log('Editing In Progress');	
+				},
+				toggle: function(){
+					this.model.toggle();
+					this.$el.toggleClass('done');
+				},
+				destroy: function(){
+					var model = this.model;
+					this.$el.addClass('delete');
+					setTimeout(function(){
+						model.destroy({
+							contentType : 'application/json',
+							dataType : 'text',
+							success: function(model, response) {
+								console.log('Model Destroyed');
+								console.log(response);
+							},	
+							error: function(model, response) {
+								console.log('Failed Model Destroy');
+								console.log(response);
+							}	
+						});
+					}, 200);
+				}
+			});
+		
+			// App View
+			app.AppView = Backbone.View.extend({
+				el: '#todoApp',
+				initialize: function(){
+					this.input = this.$('#addTodo');
+					this.todoCollection = new app.TodoCollection(); // Create collection
+					this.todoCollection.fetch({reset: true}); // Fetch items
+					
+			        this.listenTo(this.todoCollection, 'reset', this.addAll);
+			        this.listenTo(this.todoCollection, 'add', this.addOne);
+                },
+                events: {
+	                'keypress #addTodo': 'createTodo'
+                },
+                addOne: function(todo){
+					var view = new app.TodoView({model: todo}).render();
+					$(view.el).appendTo('#todoList');
+				    setTimeout(function(){
+				        view.$el.addClass('show');
+				    }, 0);
+				},
+				addAll: function(){
+					var i = 0,
+						self = this;
+						
+					this.$('#todoList').html(''); // clean the todo list
+					this.todoCollection.each(function(todo){
+						i++;
+						setTimeout(function(){
+							self.addOne(todo);
+						}, 200*i);
+					});
+				},
+				createTodo: function(e){
+					if (e.which !== 13 || !this.input.val().trim()) { // ENTER_KEY = 13
+						return;
+					}
+					this.todoCollection.create(this.newAttributes(), {
+							wait:true,
+							success: function(model, response) {
+								console.log("Added Todo");
+								console.log(response);
+							},	
+							error: function(model, response) {
+								console.log("Adding Todo Failed");
+								console.log(response);
+							}
+					}),
+					this.input.val(''); // clean input box
+				},
+				newAttributes: function(){
+					return {
+						title: this.input.val().trim(),
+						date: new Date()
+					}
+				}
+			});
+			
+			// Start Backbone history a necessary step for bookmarkable URL's
+			Backbone.history.start();
+		    app.appView = new app.AppView();
+			</script>
+	</body>
+</html>
